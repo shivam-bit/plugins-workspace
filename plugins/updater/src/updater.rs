@@ -1124,8 +1124,38 @@ impl Update {
         // Extract files to temporary directory
         for entry in archive.entries()? {
             let mut entry = entry?;
-            let collected_path: PathBuf = entry.path()?.iter().skip(1).collect();
+            let original_path = entry.path()?;
+            let collected_path: PathBuf = original_path.iter().skip(1).collect();
+
+            // Skip entries that result in empty paths (like root-level resource fork files)
+            if collected_path.as_os_str().is_empty() {
+                println!("⚠️  Skipping root-level file: {}", original_path.display());
+                continue;
+            }
+
             let extraction_path = tmp_extract_dir.path().join(&collected_path);
+
+            println!("🔍 Processing entry:");
+            println!("   Original path: {}", original_path.display());
+            println!("   Collected path: {}", collected_path.display());
+            println!("   Extraction path: {}", extraction_path.display());
+
+            // Log file details for debugging
+            let file_name = collected_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown");
+
+            println!(
+                "📦 Extracting: {} ({} bytes)",
+                collected_path.display(),
+                entry.header().size().unwrap_or(0)
+            );
+            log::debug!(
+                "Attempting to extract: {} (size: {} bytes)",
+                collected_path.display(),
+                entry.header().size().unwrap_or(0)
+            );
 
             // Ensure parent directories exist
             if let Some(parent) = extraction_path.parent() {
@@ -1133,10 +1163,21 @@ impl Update {
             }
 
             if let Err(err) = entry.unpack(&extraction_path) {
+                println!("❌ FAILED to unpack: {}", collected_path.display());
+                println!("   Error: {:?}", err);
+                println!("   Target: {}", extraction_path.display());
+
+                log::error!("Failed to unpack file: {}", collected_path.display());
+                log::error!("Error details: {:?}", err);
+                log::error!("Target path: {}", extraction_path.display());
+
                 // Cleanup on error
                 std::fs::remove_dir_all(tmp_extract_dir.path()).ok();
                 return Err(err.into());
             }
+
+            println!("✅ Successfully extracted: {}", collected_path.display());
+            log::debug!("Successfully extracted: {}", collected_path.display());
             extracted_files.push(extraction_path);
         }
 
